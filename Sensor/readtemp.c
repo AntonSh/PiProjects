@@ -33,14 +33,29 @@ void resetPinData(struct PinData* pd) {
     pd->state = START;
     pd->bitNumber = 0;
     pd->lastTick = 0;
-    memset(pd->data, 0, 5);
+    memset(pd->data, 0, sizeof(pd->data));
 }
 //////////////////////////////////////////
 
-void parseArgs() {
-     activePins[0] = 4;
-     activePins[1] = 18;
-     nActive = 2;
+int parseArgs(int argc, const char** args) {
+     
+     if (argc < 3) {
+         return -1;
+     }
+     if(strcmp(args[1], "-pins") != 0) {
+         return -1;
+     }
+
+     int i =2;
+     for (i =2; i< argc; i++) {
+         int gpio = PIN2IO(atoi(args[i]));
+         if (gpio == 0) {
+             fprintf(stderr,"Invalid pin number - %s\n", args[i]);
+             exit(1);
+         }
+         activePins[nActive++] = gpio; 
+     }
+     return 0;
 }
 
 
@@ -51,14 +66,6 @@ void gpioAlertFunc (int gpio, int level, uint32_t tick) {
            Pins[gpio].data[bit / 8] |= (0x80 >> (bit % 8)); 
        }
        Pins[gpio].bitNumber++;
-       if(Pins[gpio].bitNumber == 40) {
-           unsigned char chksum = Pins[gpio].data[0];
-           int c;
-           for (c =1; c <4; c++) {
-               chksum += Pins[gpio].data[c];
-           }
-           printf("%d.%d,%d.%d,%s\n", Pins[gpio].data[0], Pins[gpio].data[1], Pins[gpio].data[2], Pins[gpio].data[3], chksum == Pins[gpio].data[4] ? "OK" : "CRP");
-       }
    }
 
    switch(Pins[gpio].state) {
@@ -73,33 +80,104 @@ void gpioAlertFunc (int gpio, int level, uint32_t tick) {
    Pins[gpio].lastTick = tick;
 }
 
+char PINS[] = { 0,  0,  2,  0,  3,  0,  4, 14,  0, 15,
+              17, 18, 27,  0, 22, 23,  0, 24, 10,  0,
+               9, 25, 11,  8,  0,  7,  0,  0,  5,  0,
+               6, 12, 13,  0, 19, 16, 26, 20,  0, 21};
+               
 
-void main() {
+int IO2PIN(int gpio) {
+    int i;
+    for (i=0; i<sizeof(PINS); i++) {
+       if (PINS[i] == gpio) {
+           return i+1;
+       }
+    }
+    fprintf(stderr, "Fatal: cannot map GPIO #%i to pin\n", gpio); 
+    exit(1);
+}
+
+int PIN2IO(int pin) {
+    if (pin < 1 || pin > sizeof(PINS)+1 ) {
+        return 0;
+    }
+    return PINS[pin-1];
+}
+
+int main(int argc, const char** argv) {
    int i;
-   int ret = gpioCfgClock(10, 1, 1);
-   if (gpioInitialise() < 0) {
-     printf("Failed to initialize PGPIO\n");
+   gpioCfgClock(10, 1, 1);
+   if (gpioCfgClock(10, 1, 1) < 0 || gpioInitialise() < 0) {
+     fprintf(stderr, "Failed to initialize PGPIO\n");
+     return 1;
    }
-   parseArgs();
 
+    //ensure cleanup
+    atexit(gpioTerminate);
+
+   if (parseArgs(argc, argv) < 0) {
+      fprintf(stderr, "Usage: %s -pins <pin> [<pin>] ...\n", argv[0]);
+      return 1;
+   }
+
+   /// initialize alert fn for pins
    for (i = 0; i < nActive; i++) {
         resetPinData(&Pins[activePins[i]]);
-        gpioSetAlertFunc(activePins[i], gpioAlertFunc);
-        gpioSetMode(activePins[i], PI_INPUT);
+        int ret = gpioSetAlertFunc(activePins[i], gpioAlertFunc);
+        ret  = ret < 0 ? ret : gpioSetMode(activePins[i], PI_INPUT);
+        if (ret < 0) {
+            fprintf(stderr,"Failed to set up alerts on pin #%i\n", IO2PIN(activePins[i]));
+            return 1;
+        } 
    }
 
    usleep(50000);
-
+   // send signal
    for (i = 0; i < nActive; i++) {
-       ret = gpioWrite(activePins[i], PI_LOW);
+        if (gpioWrite(activePins[i], PI_LOW) < 0) {
+            fprintf(stderr,"Failed to write to pin #%i\n", IO2PIN(activePins[i]));
+            return 1;
+        } 
    }
 
    usleep(18000);
-   
+   // tell the sensors that we are waiting for response 
    for (i = 0; i < nActive; i++) {
-       ret = gpioWrite(activePins[i], PI_HIGH);
-       ret = gpioSetMode(activePins[i], PI_INPUT);
+        int ret = gpioWrite(activePins[i], PI_HIGH);
+        ret = ret < 0 ? ret : gpioSetMode(activePins[i], PI_INPUT);
+        if (ret < 0) {
+            fprintf(stderr,"Failed to write to pin #%i\n", IO2PIN(activePins[i]));
+            return 1;
+        } 
    }
    
    usleep(100000);
+
+   int ret = 0;
+
+   for (i = 0; i < nActive; i++) {
+       int gpio = activePins[i];
+       if(Pins[gpio].bitNumber == 40) {
+           unsigned char chksum = Pins[gpio].data[0];
+           int c;
+           for (c =1; c <4; c++) {
+               chksum += Pins[gpio].data[c];
+           }
+           if (chksum == Pins[gpio].data[4]) {
+               printf("{\"temp\":%i.%i,\"humidity\":%i.%i,\"pin\":%i}\n", Pins[gpio].data[2], Pins[gpio].data[3], Pins[gpio].data[0], Pins[gpio].data[1], IO2PIN(gpio));
+           } else {
+               fprintf(stderr, "Checksum mismatch for data read from pin #%i\n", IO2PIN(gpio));
+               ret = 1;
+           }
+       } else {
+           ret = 1;
+           if(Pins[gpio].bitNumber == 0) {
+               fprintf(stderr, "No reply from pin #%i\n", IO2PIN(gpio));
+           } else {
+               fprintf(stderr, "Incorrect number of bits read from pin #%i\n", IO2PIN(gpio));
+           }
+       }
+   }
+
+   return 0;
 }
