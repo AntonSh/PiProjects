@@ -1,6 +1,7 @@
 outputfile = ""
 
 def setupLog(logFile):
+	global outputfile
 	outputfile = logFile
 
 def log(line):
