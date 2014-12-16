@@ -2,6 +2,7 @@
 import subprocess
 import time
 import sys
+import signal 
 
 import GPIOControl
 import SensorReader
@@ -57,10 +58,18 @@ def runAnalysis():
 	Utils.log(time.strftime("%c") + ", pump " + pinModes[1*currentPumpState] +  ", hum " + pinModes[1*currentHumidifierState]);
 
 
+# Gracefull shutdown
+def signal_handler(signal, frame):
+	print('Caught signal, exiting')
+	switchHumidifier(False)
+	switchPump(False)
+      
+        sys.exit(0)
+
 Utils.setupLog(logFile)
 SensorReader.setup(sensorPins)
-GPIOControl.setup([pumpPin, humPin])
-
+GPIOControl.setup({pumpPin:0, humPin:1})
+signal.signal(signal.SIGINT, signal_handler)
 
 while True:
 

@@ -1,16 +1,22 @@
 import RPi.GPIO as GPIO
 controlPins = {}
+pinMode = {}
+pullUpDown = [GPIO.PUD_UP, GPIO.PUD_DOWN]
+
+def setupPin(pin, inverted):
+	global controlPin
+        global controlPinState
+	
+	GPIO.setup(pin, GPIO.OUT,  pull_up_down = pullUpDown[inverted])
+        pinMode[pin] = inverted
+	controlPins[pin] = None
+        state = switchPin(pin, False)
 
 def setup(pins):
-	global controlPin
-	global controlPinState
-
         GPIO.setmode(GPIO.BCM)
 	for pin in pins:
-	        GPIO.setup(pin, GPIO.OUT,  pull_up_down = GPIO.PUD_UP)
-                controlPins[pin] = None
-                state = switchPin(pin, False)
-
+		setupPin(pin, pins[pin])
+	       
 def switchPin(pin, state): 
 	if not pin in controlPins:
 		print "not initialized"
@@ -18,9 +24,11 @@ def switchPin(pin, state):
 
 	if controlPins[pin] == state:
 		print "value aready set"
+		return True
 
-	inverted = not state
-        GPIO.output(pin, inverted)
-        print "Pin {} set to: {}".format(pin, ["HI", "low"][1*inverted])
+	mode = pinMode[pin]
+	value = state ^ mode
+        GPIO.output(pin, value)
+        print "Pin {} set to: {}".format(pin, ["HI", "low"][1*value])
 	controlPins[pin] = state
 	return True
