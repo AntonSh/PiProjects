@@ -1,6 +1,4 @@
 #!/usr/bin/python
-# Prototype of online polling and controlling
-
 import subprocess
 import time
 import sys
@@ -9,21 +7,26 @@ import signal
 import GPIOControl
 import SensorReader
 import Utils
+import sqlite3 as lite
+from datetime import datetime, date
 
 pinModes = ["off", "ON"]
 
-targetRH = 80
+targetRH = 10
 rhDev = 2.5
 
-targetTemp = 15
+targetTemp = 10
 tempDev = 1
 
 pumpPin = 18
 humPin = 23
-sensorPins = [2, 17]
-logFile = "/home/ahtoxa/control.log"
 
-refreshSec = 10
+logFile = "../logs/control.log"
+dataStream = "../Data/sensor_stream.db"
+
+refreshSec = 30
+historyWindowSec = 60
+
 
 currentPumpState = False
 currentHumidifierState = False
@@ -38,27 +41,41 @@ def switchPump(state):
 	if state <> currentPumpState and GPIOControl.switchPin(pumpPin, state):
 		currentPumpState = state
 
-def runAnalysis():
-	value = SensorReader.getReadings() 
-        temp = [x["temp"] for x in value]
-       	avgTemp = sum(temp) / len(temp)
+def checkT(temp):
+	desiredPumpState = temp > targetTemp
 
-        desiredPumpState = avgTemp > targetTemp
-
-	if not (targetTemp - tempDev <= avgTemp <= targetTemp + tempDev) and (desiredPumpState <> currentPumpState):		
+	if not (targetTemp - tempDev <= temp <= targetTemp + tempDev) and (desiredPumpState <> currentPumpState):		
 	        Utils.log(time.strftime("%c") + ", requested pump " + pinModes[1*desiredPumpState]);
 		switchPump(desiredPumpState)
 
-        rh = [x["humidity"] for x in value]
-	avgRH = sum(rh) / len(rh)
-	desiredHumidifierState = avgRH < targetRH
+def checkRH(rh):
+	desiredHumidifierState = rh < targetRH
 
-	if not (targetRH - rhDev <= avgRH <= targetRH + rhDev) and (desiredHumidifierState <> currentHumidifierState):
+	if not (targetRH - rhDev <= rh <= targetRH + rhDev) and (desiredHumidifierState <> currentHumidifierState):
                 Utils.log(time.strftime("%c") + ", requested humidifier " + pinModes[1*desiredHumidifierState]);
 		switchHumidifier(desiredHumidifierState)
 
-	Utils.log(time.strftime("%c") + ", pump " + pinModes[1*currentPumpState] +  ", hum " + pinModes[1*currentHumidifierState]);
+def runControl():
+	try:
+		Utils.log(time.strftime("%c") + ", running control");
 
+		con = lite.connect(dataStream)
+		cur = con.cursor()
+
+		timestamp = int(time.time()) - historyWindowSec
+		cur.execute("select avg(temperature), avg(humidity) from sensor_log where time_stamp > ?", [timestamp])
+		result = cur.fetchall()
+		T = result[0][0]
+		RH = result[0][1]
+
+		checkT(T)
+		checkRH(RH)
+		
+	finally:
+		Utils.log(time.strftime("%c") + ", done running control ");
+
+		if(con != None):
+			con.close()
 
 # Gracefull shutdown
 def signal_handler(signal, frame):
@@ -69,14 +86,13 @@ def signal_handler(signal, frame):
         sys.exit(0)
 
 Utils.setupLog(logFile)
-SensorReader.setup(sensorPins)
 GPIOControl.setup({pumpPin:0, humPin:1})
 signal.signal(signal.SIGINT, signal_handler)
 
 while True:
 
         try:
-		runAnalysis()
+		runControl()
             				
         except:
                 print sys.exc_info()
