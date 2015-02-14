@@ -1,0 +1,47 @@
+#!/usr/bin/python
+import time
+import sys
+import sqlite3 as lite
+from twitter import *
+from datetime import datetime, date
+
+
+token = open('/home/ahtoxa/twitter/token', 'r').readline()
+token_key = open('/home/ahtoxa/twitter/token_key', 'r').readline()
+con_secret = open('/home/ahtoxa/twitter/con_secret', 'r').readline()
+con_secret_key = open('/home/ahtoxa/twitter/con_secret_key', 'r').readline()
+
+dataStream = "../Data/sensor_stream.db"
+
+refreshSec = 600
+
+def runReport():
+	try:
+		con = lite.connect(dataStream)
+		cur = con.cursor()
+
+		timestamp = int(time.time()) - refreshSec
+		cur.execute("select avg(temperature), avg(humidity) from sensor_log where time_stamp > ?", [timestamp])
+		result = cur.fetchall()
+		T = result[0][0]
+		RH = result[0][1]
+
+		tweet = "Temperature: {:10.1f}, Humidity: {:10.1f}".format(T, RH)
+		postTweet (tweet)
+	finally:
+		if(con != None):
+			con.close()
+def postTweet(tweet):
+	print tweet
+	t = Twitter(auth=OAuth(token, token_key, con_secret, con_secret_key))
+	t.statuses.update(status="Average data since last report\n{}".format(tweet))
+
+while True:
+
+        try:
+		runReport()
+            				
+        except:
+                print sys.exc_info()
+
+        time.sleep(refreshSec)

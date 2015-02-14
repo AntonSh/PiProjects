@@ -42,7 +42,7 @@ int parseArgs(int argc, const char** args) {
      if (argc < 3) {
          return -1;
      }
-     if(strcmp(args[1], "-pins") != 0) {
+     if(strcmp(args[1], "-gpio") != 0) {
          return -1;
      }
 
@@ -87,21 +87,23 @@ char PINS[] = { 0,  0,  2,  0,  3,  0,  4, 14,  0, 15,
                
 
 int IO2PIN(int gpio) {
-    int i;
-    for (i=0; i<sizeof(PINS); i++) {
-       if (PINS[i] == gpio) {
-           return i+1;
-       }
-    }
-    fprintf(stderr, "Fatal: cannot map GPIO #%i to pin\n", gpio); 
-    exit(1);
+    //int i;
+    //for (i=0; i<sizeof(PINS); i++) {
+    //   if (PINS[i] == gpio) {
+    //       return i+1;
+    //   }
+    //}
+    //fprintf(stderr, "Fatal: cannot map GPIO #%i to pin\n", gpio); 
+    //exit(1);
+    return gpio;
 }
 
 int PIN2IO(int pin) {
-    if (pin < 1 || pin > sizeof(PINS)+1 ) {
+    if (pin < 1 || pin >= NUMPINS ) {
         return 0;
     }
-    return PINS[pin-1];
+    //return PINS[pin-1];
+    return pin;
 }
 
 int main(int argc, const char** argv) {
@@ -116,7 +118,7 @@ int main(int argc, const char** argv) {
     atexit(gpioTerminate);
 
    if (parseArgs(argc, argv) < 0) {
-      fprintf(stderr, "Usage: %s -pins <pin> [<pin>] ...\n", argv[0]);
+      fprintf(stderr, "Usage: %s -gpio <pin> [<pin>] ...\n", argv[0]);
       return 1;
    }
 

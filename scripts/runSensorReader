@@ -1,0 +1,4 @@
+#!/bin/bash
+gcc -o readtemp ../Sensor/readtemp.c -lpigpio -lrt -lpthread
+sudo ./readtemp -gpio 4 18 
+rm readtemp

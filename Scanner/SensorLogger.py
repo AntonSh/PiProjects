@@ -3,12 +3,17 @@ import subprocess
 import time
 import sys
 import signal 
+from datetime import datetime, date
+import argparse
+import sqlite3 as lite
 
 import GPIOControl
 import SensorReader
 import Utils
-import sqlite3 as lite
-from datetime import datetime, date
+
+# Constants
+logFile = "../logs/control.log"
+databaseFile = "../Data/sensor_stream.db"
 
 # Gracefull shutdown
 def signal_handler(signal, frame):
@@ -16,13 +21,18 @@ def signal_handler(signal, frame):
 
         sys.exit(0)
 
-sensorPins = [2, 17]
-logFile = "../logs/control.log"
-databaseFile = "../Data/sensor_stream.db"
-refreshSec = 10
+parser = argparse.ArgumentParser(description='Polls environment sensors and stores data in Sqlite database')
+parser.add_argument('-pins', type=int, nargs='+', help='List of GPIO port numbers on which sensors connected', required = True)
+parser.add_argument('-refreshSec', type=int, help='Delays between sensor polling, sec', default=10)
+
+args = parser.parse_known_args()[0]
+
+sensorPins = args.pins
+refreshSec = args.refreshSec
+
+print "Running sensor logging on pins {} refresh delay {} sec.".format(sensorPins, refreshSec)
 
 SensorReader.setup(sensorPins)
-
 signal.signal(signal.SIGINT, signal_handler)
 
 

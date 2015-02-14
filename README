@@ -1,0 +1,23 @@
+Raspberry Pi controlled Refregirator
+
+Main modules:
+0. DHT11/22 data aquisition command line utility
+1. Sensor Logger
+2. Environment Controller
+3. Twitter logging module
+
+
+DHT11/22 data aquisition command line utility
+
+
+Sensor Logger
+Python component that runs sensor data aquisition and stores sensor data in the database
+Accepts GPIO pin numbers, delay as input
+Stores collected information along with timestamps in Sqlite database 
+
+Environment Controller
+Active component that controls humidifier and refregirator pump
+Explain parameters
+
+Twitter logging module
+Going to post temperature and humidity information once a minute to Twitter
