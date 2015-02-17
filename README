@@ -8,7 +8,10 @@ Main modules:
 
 
 DHT11/22 data aquisition command line utility
-
+compiling:
+gcc -o readtemp readtemp.c -lpigpio -lrt -lpthread
+running:
+sudo ./readtemp -gpio 4 18 22
 
 Sensor Logger
 Python component that runs sensor data aquisition and stores sensor data in the database

@@ -28,3 +28,4 @@
 ._.DS_Store
 logs/*
 *.db
+Sensor/readtemp
