@@ -5,7 +5,7 @@ import time
 import sys
 import Utils
 
-readTemp = "/home/mray/PiProjects/Sensor/readtemp"
+readTemp = "../Sensor/readtemp"
 
 pins = []
 
