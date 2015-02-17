@@ -2,9 +2,11 @@
 import time
 import sys
 import os
+import collections
 import sqlite3 as lite
 from twitter import *
 from datetime import datetime, date
+import numpy as np
 import matplotlib
 import matplotlib.dates as md
 matplotlib.use('Agg')
@@ -16,16 +18,22 @@ token_key = open('/home/ahtoxa/twitter/token_key', 'r').readline()
 con_secret = open('/home/ahtoxa/twitter/con_secret', 'r').readline()
 con_secret_key = open('/home/ahtoxa/twitter/con_secret_key', 'r').readline()
 
-dataStream = "../Data/sensor_stream.db"
-controlStream = "../Data/control_stream.db"
+Default_RH = 40
+Default_Temp = 18
+
+database = { "sensor_log": "../Data/sensor_stream.db",
+			 "control_log": "../Data/control_stream.db" }
+
 logDirectory = "../logs"
 
+historyLenSec = 1800
 refreshSec = 600
-labels = { 2 : "Temperature", 3 : "Humidity" }
+sensorParams = { 2 : "Temperature", 3 : "Humidity" }
+chartScale = { "Temperature" : (8, 20), "Humidity":(30, 100), "Control" : (-0.01, 1.01)}
 
 def queryLogData(tableName, timestamp):
 	try:
-		con = lite.connect(dataStream)
+		con = lite.connect(database[tableName])
 		cur = con.cursor()
 
 		query = "select * from {} where time_stamp > ?".format(tableName)
@@ -36,55 +44,99 @@ def queryLogData(tableName, timestamp):
 		if(con != None):
 			con.close()
 
-def runReport():	
-	timestamp = int(time.time()) - refreshSec
-	result = queryLogData("sensor_log", timestamp)
+def generateControlChart(timestamp):
+	log = queryLogData("control_log", timestamp)
+	controls = set([c[1] for c in log])	
 
-	if len(result) == 0:
-		return ("No data!", "error picture")
+	print "Found controls {}".format(controls)
 
-	sensors = set([x[1] for x in result])
+	result = {}
+	for control in controls:
+		print "processing control {}".format(control)
+		controlData = filter(lambda x: x[1] == control, log)
+
+		dates = [datetime.fromtimestamp(x[0]) for x in controlData]
+		xValues = md.date2num(dates)
+		yValues = [y[2] for y in controlData]
+		result[control] = (xValues, yValues)
+
+	return { "Control" : result }
+
+def generateSensorChart(timestamp):
+	log = queryLogData("sensor_log", timestamp)
+	sensors = set([s[1] for s in log])
+
 	print "Found sensors {}".format(sensors)
-	
-	axis = createPlot()
 
-	for sensor in sensors:
-		print "processing sensor {}".format(sensor)
-		sensorData = filter(lambda x: x[1] == sensor, result)
+	result = {}
 
-		for label in labels:
+	for param, paramLabel in sensorParams.iteritems():
+		result[paramLabel] = {}
+
+		for sensor in sensors:
+			print "processing {} sensor {}".format(paramLabel, sensor)
+
+			sensorData = filter(lambda x: x[1] == sensor, log)
 			dates = [datetime.fromtimestamp(x[0]) for x in sensorData]
 			xValues = md.date2num(dates)
+			yValues = [y[param] for y in sensorData]
 
-			yValues = [x[label] for x in sensorData]
-			axis[label].plot(xValues, yValues)
-			axis[label].autoscale_view()
+			result[paramLabel]["Sensor {}".format(sensor)] = (xValues, yValues)
 
+	return result	
 
-			
-	T = sum([x[2] for x in result])/len(result)
-	RH = sum([x[3] for x in result])/len(result)
+def runReport():	
+	timestamp = int(time.time()) - historyLenSec
+	chartData = collections.OrderedDict()
 
-	picture = savePlot("{}".format(result[0][0]))
-	tweet = "Temperature: {:10.1f}, Humidity: {:10.1f}".format(T, RH)
+	sensorData = generateSensorChart(timestamp)
+	chartData.update(sensorData)
 
-	return (tweet, picture)
+	controlData = generateControlChart(timestamp)
+	chartData.update(controlData)
+	
+	targets = findTargetParameters()
 
+	message = createReportMessage(chartData, targets)
+	picture = createCharts(chartData, "{}".format(timestamp), targets)
 
-def createPlot():
-	#[u'grayscale', u'bmh', u'dark_background', u'ggplot', u'fivethirtyeight']	
+	return message, picture
+
+def createReportMessage(inputData, targets):
+	message = "Average values for last {} minutes\n".format(historyLenSec/60)
+
+	for param in sensorParams.itervalues():
+		sensors = inputData[param]
+		values = [data[1] for data in sensors.itervalues()]
+		
+		message = message + "{} {:10.1f}, Target {:10.1f};\n".format(param, np.mean(values), targets[param])
+
+	return message
+
+def createCharts(inputData, label, targets):
 	plt.style.use("ggplot")
-	fig, axis = plt.subplots(nrows=len(labels), sharex=True)				
+	fig, axis = plt.subplots(nrows=len(inputData), sharex=True)				
 
-	for ax in axis: 
-		ax.xaxis.set_major_formatter(md.DateFormatter('%H:%M:%S'))
+	axis = dict(zip(inputData, axis))
 
-	axis = dict(zip(labels, axis))
-	for a in axis: axis[a].set_title(labels[a])
+	for chartName, chartData in inputData.iteritems():
+		chart = axis[chartName]
+		chart.xaxis.set_major_formatter(md.DateFormatter('%H:%M:%S'))
+		chart.set_title(chartName)
 
-	return axis
+		# Populate with data		
+		for name, line in chartData.iteritems():
+			chart.plot(line[0], line[1], label=name)
+			chart.set_ylim(chartScale[chartName])
 
-def savePlot(label):
+		if chartName in targets:
+			chart.axhline(y = targets[chartName], label="Target")
+
+		chart.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc=3, ncol=2, mode="expand", borderaxespad=0.)
+
+		# chart.legend(loc='lower left', fontsize="small", framealpha = 0.5, fancybox=True, ncol=3, frameon=True)
+
+
 	lc, lb = plt.xticks()
 	plt.setp(lb, rotation=45)
 
@@ -93,7 +145,7 @@ def savePlot(label):
 	plt.savefig(filename, dpi = 100)
 	print "saved"
 
-	matplotlib.pyplot.close("all")	
+	plt.close(fig)
 	return filename
 
 def postTweet(tweet, picture):
@@ -101,17 +153,65 @@ def postTweet(tweet, picture):
 	t = Twitter(auth=OAuth(token, token_key, con_secret, con_secret_key))
 
 	with open(picture, "rb") as imagefile:
-		params = {"media[]": imagefile.read(), "status": "Average data since last report\n{}".format(tweet)}
+		params = {"media[]": imagefile.read(), "status": tweet}
 		t.statuses.update_with_media(**params)
 	
 	os.remove(picture)
 
+
+#TODO unify with environment regulator
+def findTargetParameters():
+
+	temp = Default_Temp
+	rh 	 = Default_RH
+
+	try:
+		con = lite.connect(database["control_log"])
+
+		timestamp = int(time.time())
+		cur = con.cursor()  
+
+		cur.execute("select * from control_target where time_stamp < ? order by time_stamp desc limit 1" , [timestamp])
+		pastTarget = cur.fetchall()
+
+		cur.execute("select * from control_target where time_stamp > ? order by time_stamp asc limit 1" , [timestamp])
+		futureTarget = cur.fetchall()
+
+		futureTimestamp = futureTarget[0][0]
+		pastTimestamp = pastTarget[0][0]
+
+		scale = (1.0 * timestamp - pastTimestamp) / (futureTimestamp - pastTimestamp)
+
+		futureTemp = futureTarget[0][1]
+		futureRH   = futureTarget[0][2]
+
+		pastTemp   = pastTarget[0][1]
+		pastRH 	   = pastTarget[0][2]
+
+		temp  = pastTemp + scale * (futureTemp - pastTemp)
+		rh = pastRH + scale * (futureRH - pastRH)				
+
+	except lite.Error, e:
+		if con:
+			con.rollback()
+
+		print "Error %s:" % e.args[0]
+
+	except:
+		print sys.exc_info()
+
+	finally:
+		if con:
+			con.close() 
+
+	return { "Temperature" : temp, "Humidity" : rh }  
+
+
 while True:
 
 	try:
-		tweet = runReport()
-		postTweet (*tweet)
-
+		report = runReport()
+		postTweet (*report)
 	except:
 		print sys.exc_info()
 

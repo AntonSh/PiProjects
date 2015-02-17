@@ -14,9 +14,12 @@ import Utils
 # constants
 pinModes = ["off", "ON"]
 
+Default_RH = 40
+Default_Temp = 18
+
 logFile = "../logs/control.log"
 dataStream = "../Data/sensor_stream.db"
-controlFile = "../Data/contol_steam.db"
+controlFile = "../Data/control_stream.db"
 
 # running state
 currentPumpState = False
@@ -32,19 +35,68 @@ def switchPump(state):
 	if state <> currentPumpState and GPIOControl.switchPin(pumpPin, state):
 		currentPumpState = state
 
-def checkT(temp):
+def checkT(temp, targetTemp):
 	desiredPumpState = temp > targetTemp
 
 	if not (targetTemp - tempDev <= temp <= targetTemp + tempDev) and (desiredPumpState <> currentPumpState):		
 		Utils.log(time.strftime("%c") + ", requested pump " + pinModes[1*desiredPumpState]);
 		switchPump(desiredPumpState)
 
-def checkRH(rh):
+def checkRH(rh, targetRH):
 	desiredHumidifierState = rh < targetRH
 
 	if not (targetRH - rhDev <= rh <= targetRH + rhDev) and (desiredHumidifierState <> currentHumidifierState):
 		Utils.log(time.strftime("%c") + ", requested humidifier " + pinModes[1*desiredHumidifierState]);
 		switchHumidifier(desiredHumidifierState)
+
+def findTargetParameters():
+
+	temp = Default_Temp
+	rh 	 = Default_RH
+
+	try:
+		con = lite.connect(controlFile)
+
+		timestamp = int(time.time())
+		cur = con.cursor()  
+
+		cur.execute("select * from control_target where time_stamp < ? order by time_stamp desc limit 1" , [timestamp])
+		pastTarget = cur.fetchall()
+
+		cur.execute("select * from control_target where time_stamp > ? order by time_stamp asc limit 1" , [timestamp])
+		futureTarget = cur.fetchall()
+
+		futureTimestamp = futureTarget[0][0]
+		pastTimestamp = pastTarget[0][0]
+
+		scale = (1.0 * timestamp - pastTimestamp) / (futureTimestamp - pastTimestamp)
+
+		futureTemp = futureTarget[0][1]
+		futureRH   = futureTarget[0][2]
+
+		pastTemp   = pastTarget[0][1]
+		pastRH 	   = pastTarget[0][2]
+
+		temp  = pastTemp + scale * (futureTemp - pastTemp)
+		rh = pastRH + scale * (futureRH - pastRH)				
+
+		Utils.log(time.strftime("%c") + ", running control, target T: {:10.1f}, RH {:10.1f}%".format(temp, rh));
+
+
+	except lite.Error, e:
+		if con:
+			con.rollback()
+
+		print "Error %s:" % e.args[0]
+
+	except:
+		print sys.exc_info()
+
+	finally:
+		if con:
+			con.close() 
+
+	return temp, rh 
 
 def updateDatabase():
 	try:
@@ -74,7 +126,7 @@ def updateDatabase():
 		if con:
 			con.close() 
 
-def runControl():
+def runControl(targetT, targetRH):
 	try:
 		Utils.log(time.strftime("%c") + ", running control");
 
@@ -96,9 +148,8 @@ def runControl():
 			switchPump(False)
 			return
 
-
-		checkT(T)
-		checkRH(RH)
+		checkT(T, targetT)
+		checkRH(RH, targetRH)
 		
 	finally:
 		updateDatabase()
@@ -119,10 +170,8 @@ def signal_handler(signal, frame):
 
 # input parameters
 parser = argparse.ArgumentParser(description='Environment regulator process controls humidifier and refregirator compressor pump uses data from Sqlite database')
-parser.add_argument('-rh',    type=int, help='Target relative humidity of the environment',           required = True)
 parser.add_argument('-rhDev', type=int, help='Acceptable relative humidity deviation from target rh', default=2)
 
-parser.add_argument('-t',     type=int, help='Target environment temperature',                        required = True)
 parser.add_argument('-tDev',  type=int, help='Accptable environment temperature deviation',           default=1)
 
 parser.add_argument('-pumpPin',    type=int, help='GPIO pin that controls refregirator pump relay',   required = True)
@@ -137,11 +186,8 @@ parser.add_argument('-avgWindow', type=int, help='Sensor data averagin period (s
 args = parser.parse_known_args()[0]
 
 
-# TODO make this parameters updated on flight using data stored in Sqlite
-targetRH = args.rh
 rhDev = args.rhDev
 
-targetTemp = args.t
 tempDev = args.tDev
 
 pumpPin = args.pumpPin
@@ -153,7 +199,7 @@ humPinMode = args.humidifierPinMode
 refreshSec = args.frequency
 historyWindowSec = args.avgWindow
 
-print "Running Environment Regulator \n Temp: {}; Temp Dev {}; \n RH {}; RH Dev {};".format(targetTemp, tempDev, targetRH, rhDev);
+print "Running Environment Regulator\n Temp Dev {}; RH Dev {};".format(tempDev, rhDev);
 print "Pump pin {}; Pump pin mode {}; Humidifier pin {}; Humidifier pin mode {};".format(pumpPin, pumpPinMode, humPin, humPinMode);
 print "Refresh Rate {}; Averaging window {};".format(refreshSec, historyWindowSec);
 
@@ -169,7 +215,8 @@ signal.signal(signal.SIGINT, signal_handler)
 while True:
 
         try:
-		runControl()
+        	targetT, targetRH = findTargetParameters()
+        	runControl(targetT, targetRH)
             				
         except:
                 print sys.exc_info()

@@ -19,7 +19,7 @@ def getReadings():
 	global pins
 	output = subprocess.check_output([readTemp, "-gpio"]+(map(str, pins))).strip()
 	
-        line = "[{}]".format(', '.join(output.split('\n')))
+	line = "[{}]".format(', '.join(output.split('\n')))
 	val = eval(line)
 	dataDict = dict(map((lambda l: (l['pin'], l)), val))
 	fileLine = time.strftime("%c") + ", " +  ", ".join(map((lambda x: "{}, {}".format(dataDict[x]['temp'],dataDict[x]['humidity'])), pins)) 
