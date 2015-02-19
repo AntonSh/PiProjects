@@ -26,7 +26,7 @@ database = { "sensor_log": "../Data/sensor_stream.db",
 
 logDirectory = "../logs"
 
-historyLenSec = 1800
+historyLenSec = 3600
 refreshSec = 600
 sensorParams = { 2 : "Temperature", 3 : "Humidity" }
 chartScale = { "Temperature" : (8, 20), "Humidity":(30, 100), "Control" : (-0.01, 1.01)}

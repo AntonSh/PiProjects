@@ -7,6 +7,7 @@ import argparse
 import sqlite3 as lite
 from datetime import datetime, date
 
+import PWMThread
 import GPIOControl
 import SensorReader
 import Utils
@@ -24,6 +25,21 @@ controlFile = "../Data/control_stream.db"
 # running state
 currentPumpState = False
 currentHumidifierState = False
+
+# input parameters
+parser = argparse.ArgumentParser(description='Environment regulator process controls humidifier and refregirator compressor pump uses data from Sqlite database')
+parser.add_argument('-rhDev', type=int, help='Acceptable relative humidity deviation from target rh', default=2)
+
+parser.add_argument('-tDev',  type=int, help='Accptable environment temperature deviation',           default=1)
+
+parser.add_argument('-pumpPin',    type=int, help='GPIO pin that controls refregirator pump relay',   required = True)
+parser.add_argument('-pumpPinMode', choices=pinModes, help='Pump pin state when pump is OFF',         default = pinModes[0])
+
+parser.add_argument('-humidifierPin', type=int, help='GPIO pin that controls humidifier',             required = True)
+parser.add_argument('-humidifierPinMode', choices=pinModes, help='Humidifier pin state when humidifier is OFF', default = pinModes[0])
+
+parser.add_argument('-frequency', type=int, help='Sensor data refresh frequency (seconds)',       default = 30)
+parser.add_argument('-avgWindow', type=int, help='Sensor data averagin period (seconds)',         default = 60)
 
 def switchHumidifier(state):
 	global currentHumidifierState
@@ -82,7 +98,6 @@ def findTargetParameters():
 
 		Utils.log(time.strftime("%c") + ", running control, target T: {:10.1f}, RH {:10.1f}%".format(temp, rh));
 
-
 	except lite.Error, e:
 		if con:
 			con.rollback()
@@ -134,7 +149,7 @@ def runControl(targetT, targetRH):
 		cur = con.cursor()
 
 		timestamp = int(time.time()) - historyWindowSec
-		cur.execute("select avg(temperature), avg(humidity), count(*) from sensor_log where time_stamp > ?", [timestamp])
+		cur.execute("select temperature, humidity from sensor_log where time_stamp > ?", [timestamp])
 		result = cur.fetchall()
 		samples = result[0][2]
 
@@ -165,23 +180,6 @@ def signal_handler(signal, frame):
 	switchPump(False)
       
         sys.exit(0)
-
-
-
-# input parameters
-parser = argparse.ArgumentParser(description='Environment regulator process controls humidifier and refregirator compressor pump uses data from Sqlite database')
-parser.add_argument('-rhDev', type=int, help='Acceptable relative humidity deviation from target rh', default=2)
-
-parser.add_argument('-tDev',  type=int, help='Accptable environment temperature deviation',           default=1)
-
-parser.add_argument('-pumpPin',    type=int, help='GPIO pin that controls refregirator pump relay',   required = True)
-parser.add_argument('-pumpPinMode', choices=pinModes, help='Pump pin state when pump is OFF',                 default = pinModes[0])
-
-parser.add_argument('-humidifierPin', type=int, help='GPIO pin that controls humidifier',             required = True)
-parser.add_argument('-humidifierPinMode', choices=pinModes, help='Humidifier pin state when humidifier is OFF', default = pinModes[0])
-
-parser.add_argument('-frequency', type=int, help='Sensor data refresh frequency (seconds)',       default = 30)
-parser.add_argument('-avgWindow', type=int, help='Sensor data averagin period (seconds)',         default = 60)
 
 args = parser.parse_known_args()[0]
 
