@@ -1,2 +1,2 @@
 #!/bin/bash
-/usr/bin/python ../Scanner/SensorLogger.py -pins 4 18 -refreshSec 5
+/usr/bin/python ../Scanner/SensorLogger.py -pins 4 18 13 -refreshSec 5

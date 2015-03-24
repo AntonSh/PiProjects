@@ -45,25 +45,56 @@ def switchHumidifier(state):
 	global currentHumidifierState
 	if state <> currentHumidifierState and GPIOControl.switchPin(humPin, state):
 		currentHumidifierState = state
+	
+	updateDatabase()
+	pass
 
 def switchPump(state):
 	global currentPumpState
 	if state <> currentPumpState and GPIOControl.switchPin(pumpPin, state):
 		currentPumpState = state
 
-def checkT(temp, targetTemp):
-	desiredPumpState = temp > targetTemp
+	updateDatabase()
+	pass
 
-	if not (targetTemp - tempDev <= temp <= targetTemp + tempDev) and (desiredPumpState <> currentPumpState):		
-		Utils.log(time.strftime("%c") + ", requested pump " + pinModes[1*desiredPumpState]);
-		switchPump(desiredPumpState)
+tempBias = 0
+tempGain = 0.1
+tempIScale = 0.5
+tempDScale = 0.01
 
-def checkRH(rh, targetRH):
-	desiredHumidifierState = rh < targetRH
+def runTemperaturePID(temp, targetTemp):
+	controlSignal = runPid(temp, targetTemp, tempGain, tempIScale, tempDScale, tempBias)
+	dutyCycle = min(1, max(0, controlSignal))
+	if dutyCycle != controlSignal:
+		print "Warn temperature control signal clipped {:10.1f}".format(controlSignal)
 
-	if not (targetRH - rhDev <= rh <= targetRH + rhDev) and (desiredHumidifierState <> currentHumidifierState):
-		Utils.log(time.strftime("%c") + ", requested humidifier " + pinModes[1*desiredHumidifierState]);
-		switchHumidifier(desiredHumidifierState)
+	dutyCycle = 1-dutyCycle
+	print "Settin pump duty cycle to {:10.1f}".format(dutyCycle)
+	temperatureThread.setDutyCycle(dutyCycle)
+	pass
+
+rhBias = 0
+rhGain = 0.01
+rhIScale = 0.5
+rhDScale = 0.01
+
+def runHumidityPID(rh, targetRH):
+	controlSignal = runPid(rh, targetRH, rhGain, rhIScale, rhDScale, rhBias)
+	dutyCycle = min(1, max(0, controlSignal))
+	if dutyCycle != controlSignal:
+		print "Warn humidifier control signal clipped {:10.1f}".format(controlSignal)
+
+	print "Settin humidifier duty cycle to {:10.1f}".format(dutyCycle)
+	humidifierThread.setDutyCycle(dutyCycle)
+	pass
+
+pidRange = range(2)
+def runPid(stream, target, gain, iScale, dScale, bias):
+	P = stream[0] - target
+	I = sum([stream[i] - target for i in pidRange])
+	D = stream[0]-stream[1]
+
+	return gain * (P + 1/iScale * I + dScale * D) + bias
 
 def findTargetParameters():
 
@@ -149,22 +180,21 @@ def runControl(targetT, targetRH):
 		cur = con.cursor()
 
 		timestamp = int(time.time()) - historyWindowSec
-		cur.execute("select temperature, humidity from sensor_log where time_stamp > ?", [timestamp])
+		cur.execute("select time_stamp, avg(temperature), avg(humidity) from sensor_log where time_stamp > ? group by time_stamp order by time_stamp desc", [timestamp])
 		result = cur.fetchall()
-		samples = result[0][2]
 
-		T = result[0][0]
-		RH = result[0][1]
-
-		if samples == 0:
+		if len(result) == 0:
 			Utils.log(time.strftime("%c") + ", No environment data detected, shutting down equipment!");
 			
 			switchHumidifier(False)
 			switchPump(False)
 			return
 
-		checkT(T, targetT)
-		checkRH(RH, targetRH)
+		T = [t[1] for t in result]
+		RH = [rh[2] for rh in result]
+
+		runTemperaturePID(T, targetT)
+		runHumidityPID(RH, targetRH)
 		
 	finally:
 		updateDatabase()
@@ -182,7 +212,6 @@ def signal_handler(signal, frame):
         sys.exit(0)
 
 args = parser.parse_known_args()[0]
-
 
 rhDev = args.rhDev
 
@@ -210,9 +239,15 @@ gpioConfig = {
 GPIOControl.setup(gpioConfig)
 signal.signal(signal.SIGINT, signal_handler)
 
-while True:
+temperatureThread = PWMThread.PWMThread(controlCallback = switchPump, periodSec = 600, minPulseRatio=4, name = "Temperature PWM")
+humidifierThread  = PWMThread.PWMThread(controlCallback = switchHumidifier, periodSec = 300, minPulseRatio=30, name = "Humidifier PWM")
 
+# temperatureThread.run()
+# humidifierThread.run()
+
+while True:
         try:
+        	print "running control loop"
         	targetT, targetRH = findTargetParameters()
         	runControl(targetT, targetRH)
             				

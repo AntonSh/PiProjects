@@ -1,2 +1,2 @@
 #!/bin/bash
-/usr/bin/python ../Scanner/EnvironmentRegulator.py -rh 75 -t 15 -pumpPin 21 -humidifierPin 20
+/usr/bin/python ../Scanner/EnvironmentRegulator.py -rh 75 -t 15 -pumpPin 21 -humidifierPin 20 -humidifierPinMode ON

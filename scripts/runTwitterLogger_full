@@ -13,10 +13,10 @@ matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 
-token = open('/home/ahtoxa/twitter/token', 'r').readline()
-token_key = open('/home/ahtoxa/twitter/token_key', 'r').readline()
-con_secret = open('/home/ahtoxa/twitter/con_secret', 'r').readline()
-con_secret_key = open('/home/ahtoxa/twitter/con_secret_key', 'r').readline()
+token = open('../../twitter/token', 'r').readline().strip()
+token_secret = open('../../twitter/token_secret', 'r').readline().strip()
+consumer_key = open('../../twitter/consumer_key', 'r').readline().strip()
+consumer_secret = open('../../twitter/consumer_secret', 'r').readline().strip()
 
 Default_RH = 40
 Default_Temp = 18
@@ -150,7 +150,11 @@ def createCharts(inputData, label, targets):
 
 def postTweet(tweet, picture):
 	print tweet
-	t = Twitter(auth=OAuth(token, token_key, con_secret, con_secret_key))
+	t = Twitter(auth=OAuth(
+			consumer_key=consumer_key,
+    		consumer_secret=consumer_secret,
+    		token=token,
+    		token_secret=token_secret))
 
 	with open(picture, "rb") as imagefile:
 		params = {"media[]": imagefile.read(), "status": tweet}
